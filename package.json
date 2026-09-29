@@ -1,0 +1,21 @@
+{
+  "name": "skills",
+  "version": "1.0.0",
+  "description": "Roald's agents skills for engineering",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/roaldnefs/skills.git"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "license": "MIT",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.18.0",
+      "onFail": "download"
+    }
+  }
+}
