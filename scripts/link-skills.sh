@@ -2,11 +2,14 @@
 # Symlink all skills in this repo into ~/.claude/skills and ~/.agents/skills.
 set -euo pipefail
 
-repo="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$(dirname "$0")/.."
+repo="$PWD"
+skills="$(scripts/list-skills.sh)"
+[ -n "$skills" ] || exit 0
 
 for target in "$HOME/.claude/skills" "$HOME/.agents/skills"; do
   mkdir -p "$target"
-  "$repo/scripts/list-skills.sh" | while read -r skill; do
+  while read -r skill; do
     link="$target/$(basename "$skill")"
     if [ -L "$link" ]; then
       case "$(readlink "$link")" in
@@ -22,5 +25,5 @@ for target in "$HOME/.claude/skills" "$HOME/.agents/skills"; do
     fi
     ln -sfn "$repo/$skill" "$link"
     echo "$link -> $repo/$skill"
-  done
+  done <<< "$skills"
 done
