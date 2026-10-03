@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deck title</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%223%22 fill=%22%232F5DA8%22/%3E%3C/svg%3E">
+<!--
+  HTML deck engine. Self-contained: one file, no build step, no dependencies.
+  The only network request is the Google Fonts stylesheet below; every stack has a
+  full local fallback so the deck renders offline from file://.
+  Fonts (all SIL Open Font License 1.1): Source Serif 4, Source Sans 3, Source Code Pro.
+
+  Keys:  → / Space / PgDn  next build or slide     ← / PgUp  previous
+         ↓ next slide, all builds shown            ↑ previous slide, all builds shown
+         N speaker notes   T presenter timer (Shift+T resets)   F fullscreen   P print to PDF
+         Home / End first / last slide             Esc close overlays
+         click / tap: left 30 % of the screen back, the rest forward · swipe left / right on touch
+
+  Slide conventions:
+    <section class="slide">             light content slide
+    <section class="slide title">       title card (icon logo)
+    <section class="slide divider">     section divider
+    <section class="slide dark">        dark emphasis slide (dividers, quotes)
+    <section class="slide closing">     closing/contact card (icon logo)
+    <div class="s-notes"> inside a slide   speaker notes, shown with N
+    class="build" on any element        revealed one at a time with →
+    data-auto="500" on a section       its builds reveal by themselves, one every 500 ms
+
+  Brand: change the tokens in :root only. Deck-specific CSS goes under the
+  "deck-specific" heading at the end of the style block. Never edit the <script>.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600&family=Source+Sans+3:wght@400;600&family=Source+Code+Pro:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* ---------- brand tokens (the only part to change per brand) ---------- */
+:root{
+  --primary:#1F2A44; --black:#111827; --dark:#1E2533;
+  --grey:#5B6475; --light:#F4F6F9; --white:#FFFFFF; --action:#2F5DA8; --action-dark:#9DB8E8;
+  --ink:var(--primary); --muted:var(--grey); --accent:var(--action); --panel:var(--light);
+  /* lines on light slides, derived from --primary */
+  --line:rgba(31,42,68,.12); --rule:rgba(31,42,68,.45);
+  --term-fg:#9BE7A5; --term-blue:#8FB3FF; --term-dim:#6B7089;
+  /* OFL fonts only; fallbacks are generic CSS families, never named system fonts */
+  --font-display:"Source Serif 4",ui-serif,serif;
+  --font-body:"Source Sans 3",system-ui,sans-serif;
+  --font-mono:"Source Code Pro",ui-monospace,monospace;
+  /* logo slots: url("data:image/svg+xml,…") or none. --logo/--icon sit on light slides,
+     --logo-dark/--icon-dark on .dark slides. --watermark is an optional large mark. */
+  --logo:none; --icon:none; --logo-dark:none; --icon-dark:none;
+  --watermark:none; --watermark-dark:none;
+}
+
+/* ---------- stage: fixed 1920x1080, scaled to the viewport ---------- */
+html,body{margin:0;height:100%;background:var(--black);overflow:hidden}
+#stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;
+  transform:translate(-50%,-50%) scale(var(--scale,1))}
+.slide{position:absolute;inset:0;display:none;box-sizing:border-box;padding:120px 160px 160px;
+  color:var(--ink);font:400 30px/1.5 var(--font-body);overflow:hidden;background:var(--white)}
+.slide.current{display:block}
+.slide.current:is(.divider,.quote){display:flex}
+/* title card: each time it is shown, the text rises in and an accent rule draws under the heading */
+.slide.title h1::after{content:"";display:block;width:160px;height:6px;margin-top:44px;background:var(--accent);transform-origin:left}
+.slide.title.current .kicker{animation:rise .8s cubic-bezier(.2,.7,.2,1) both}
+.slide.title.current h1{animation:rise .8s .1s cubic-bezier(.2,.7,.2,1) both}
+.slide.title.current h1::after{animation:draw .7s .6s cubic-bezier(.2,.7,.2,1) both}
+.slide.title.current :is(.sub,.byline){animation:rise .8s .7s cubic-bezier(.2,.7,.2,1) both}
+@keyframes rise{from{opacity:0;transform:translateY(24px)}}
+@keyframes draw{from{transform:scaleX(0)}}
+@media (prefers-reduced-motion:reduce){.slide.title *,.slide.title *::after{animation:none!important}}
+/* optional watermark, large and low-contrast, off to the right */
+.slide::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:var(--watermark) no-repeat right -260px bottom -300px/1250px auto}
+/* logo in the bottom-left corner; icon only on title/closing cards */
+.slide::after{content:"";position:absolute;left:160px;bottom:64px;width:260px;height:60px;
+  background:var(--logo) no-repeat left center/contain}
+.slide.title::after,.slide.closing::after{width:60px;height:60px;background-image:var(--icon)}
+.slide>*{position:relative;z-index:1}
+/* dark emphasis slides */
+.slide.dark{--ink:var(--white);--muted:rgba(255,255,255,.72);--accent:var(--action-dark);
+  --line:rgba(255,255,255,.16);--rule:rgba(255,255,255,.55);--panel:rgba(255,255,255,.06);
+  background:var(--primary)}
+.slide.dark::before{background-image:var(--watermark-dark)}
+.slide.dark::after{background-image:var(--logo-dark)}
+.slide.dark.title::after,.slide.dark.closing::after{background-image:var(--icon-dark)}
+.s-notes{display:none}
+.counter{position:absolute;right:160px;bottom:80px;font:400 18px/1 var(--font-body);letter-spacing:.06em;color:var(--muted)}
+
+/* ---------- type ---------- */
+h1{font:600 80px/1.1 var(--font-display);letter-spacing:-.01em;margin:0 0 40px}
+h2{font:600 56px/1.15 var(--font-display);letter-spacing:-.01em;margin:0 0 48px}
+h3{font:600 30px/1.25 var(--font-body);margin:0 0 20px}
+p{margin:0 0 .6em}
+.kicker{font:600 18px/1 var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 32px}
+.sub{font:400 36px/1.4 var(--font-body);color:var(--muted);max-width:1150px;margin:0 0 56px}
+.byline{font-size:24px;color:var(--muted)}
+.title,.closing{padding-top:220px}
+.title h1{margin-bottom:48px}
+.divider{padding-top:0;flex-direction:column;justify-content:center}
+.divider h1{font-size:96px;margin:0}
+.divider .kicker{font-family:var(--font-display);font-size:32px;letter-spacing:.06em;margin-bottom:28px}
+ul,ol{margin:0;padding:0 0 0 1.1em}
+li{margin:0 0 .45em;padding-left:.3em}
+ul{list-style:none;padding-left:0}
+ul li{padding-left:48px;position:relative}
+ul li::before{content:"";position:absolute;left:4px;top:.53em;width:12px;height:12px;border-radius:50%;background:var(--accent)}
+.agenda{font:400 38px/1.3 var(--font-body);counter-reset:agenda;list-style:none;padding:0}
+.agenda li{counter-increment:agenda;display:flex;align-items:baseline;gap:0;padding:0;margin-bottom:.5em}
+.agenda li::before{content:counter(agenda,decimal-leading-zero);flex:0 0 120px;
+  font:600 32px/1 var(--font-display);color:var(--accent)}
+small,.small{font-size:22px;color:var(--muted)}
+a{color:inherit}
+
+/* ---------- components ---------- */
+.btn{display:inline-block;padding:18px 30px;border:1px solid var(--ink);border-radius:4px;
+  font:600 17px/1 var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--ink);text-decoration:none}
+.btn::after{content:"\00a0→"}
+.btn.action{border-color:var(--action);background:var(--action);color:var(--white)}
+.illustrative{display:inline-block;padding:8px 14px;border:1px solid var(--muted);border-radius:4px;
+  font:600 14px/1 var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);vertical-align:middle}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:40px;margin:40px 0}
+.stat{background:var(--panel);border:1px solid var(--line);border-top:4px solid var(--accent);border-radius:4px;padding:44px 44px 40px}
+.stat .n{font:600 80px/1 var(--font-display);display:block;margin-bottom:20px}
+.stat .cap{font:600 17px/1.4 var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--muted);display:block}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:start}
+.term{background:var(--dark);border:1px solid rgba(0,0,0,.08);border-radius:6px;padding:36px 40px;
+  font:400 22px/1.65 var(--font-mono);color:var(--term-fg);white-space:pre;overflow:hidden;
+  box-shadow:0 24px 60px rgba(17,24,39,.22)}
+.term .b{color:var(--term-blue)}
+.term .d{color:var(--term-dim)}
+.term .w{color:var(--white)}
+.quote{flex-direction:column;justify-content:center;padding-top:0}
+.quote blockquote{margin:0;font:400 54px/1.3 var(--font-display);max-width:1450px}
+.quote blockquote::before{content:"“";display:block;font:600 160px/.6 var(--font-display);color:var(--accent);margin-bottom:24px}
+.quote cite{display:block;margin-top:48px;font:600 18px/1 var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-style:normal}
+.logos{display:grid;grid-template-columns:repeat(4,1fr);gap:40px;margin-top:20px}
+.logos div{height:180px;display:flex;align-items:center;justify-content:center;border:1px dashed var(--rule);
+  border-radius:4px;font:600 20px/1 var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.chart{margin-top:10px;display:inline-block;padding:40px 40px 24px;background:var(--panel);border:1px solid var(--line);border-radius:4px}
+.chart svg{display:block;width:1400px;height:560px}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .axis text{font:600 19px var(--font-body);fill:var(--muted);letter-spacing:.04em}
+.chart .bar{fill:var(--accent)}
+.chart .val{font:600 28px var(--font-display);fill:var(--ink)}
+.keys{font-size:27px;border-collapse:collapse;width:100%}
+.keys td{padding:14px 20px;border-bottom:1px solid var(--line)}
+.keys td:first-child{width:260px}
+kbd{display:inline-block;min-width:1.4em;padding:6px 14px;border:1px solid var(--rule);border-radius:4px;
+  font:600 20px/1 var(--font-mono);text-align:center;margin-right:6px}
+.contact{font-size:30px;line-height:1.8;margin-bottom:56px}
+.contact .l{display:inline-block;width:220px;font:600 16px/1 var(--font-body);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+
+/* inverted highlight for key figures */
+.hl{background:var(--ink);color:var(--white);padding:0 .3em;font-weight:600}
+.dark .hl{color:var(--primary)}
+
+/* ---------- builds ---------- */
+.build{opacity:0;transform:translateY(14px);transition:opacity .35s ease,transform .35s ease}
+.build.on{opacity:1;transform:none}
+
+/* ---------- presenter overlays (viewport coordinates, unscaled) ---------- */
+#notes{position:fixed;left:0;right:0;bottom:0;max-height:38vh;overflow:auto;padding:20px 32px 28px;
+  background:rgba(17,24,39,.94);color:#fff;border-top:2px solid var(--action);
+  font:400 20px/1.5 var(--font-body);z-index:10}
+#notes::before{content:"Speaker notes";display:block;font:600 12px/1 var(--font-body);letter-spacing:.2em;
+  text-transform:uppercase;color:var(--term-blue);margin-bottom:10px}
+#timer{position:fixed;top:16px;right:16px;padding:10px 18px;background:rgba(17,24,39,.9);color:#fff;
+  border:1px solid var(--action);border-radius:4px;font:600 28px/1 var(--font-mono);z-index:10;font-variant-numeric:tabular-nums}
+[hidden]{display:none!important}
+
+/* ---------- print: one slide per page, all builds shown ---------- */
+@media print{
+  html,body{overflow:visible;height:auto;background:#fff}
+  #stage{position:static;transform:none;width:1920px;height:auto}
+  .slide{display:block;position:relative;height:1080px;break-after:page;page-break-after:always}
+  .slide:is(.divider,.quote){display:flex}
+  .build{opacity:1;transform:none;transition:none}
+  #notes,#timer{display:none!important}
+  .slide.title *,.slide.title *::after{animation:none!important}
+  *{box-shadow:none!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  @page{size:1920px 1080px;margin:0}
+}
+
+/* ---------- deck-specific ---------- */
+</style>
+</head>
+<body>
+<div id="stage">
+
+<!-- 1 · title card -->
+<section class="slide title">
+  <div class="kicker">Event name · City · Date</div>
+  <h1>Deck title<br>on two lines</h1>
+  <p class="sub">One sentence that says what the audience gets out of the next twenty minutes.</p>
+  <p class="byline">Speaker name — Role, Organisation</p>
+  <div class="s-notes">
+    <p>Opening line, verbatim. Wait for the room to settle before advancing. Press T to start the timer.</p>
+  </div>
+</section>
+
+<!-- 2 · agenda with per-item build -->
+<section class="slide">
+  <div class="kicker">Agenda</div>
+  <h2>What we'll cover</h2>
+  <ol class="agenda">
+    <li class="build">Why this matters</li>
+    <li class="build">What we did</li>
+    <li class="build">What it looks like in practice</li>
+    <li class="build">What to take home</li>
+  </ol>
+  <div class="s-notes">
+    <p>Four parts, roughly five minutes each. Right arrow reveals one item at a time; down arrow skips the rest of the build.</p>
+  </div>
+</section>
+
+<!-- 3 · section divider -->
+<section class="slide dark divider">
+  <div class="kicker">01</div>
+  <h1>Why this<br>matters</h1>
+  <div class="s-notes">
+    <p>Section divider. No content on purpose: pause, then the transition sentence into the section.</p>
+  </div>
+</section>
+
+<!-- 4 · bullets with per-item build -->
+<section class="slide">
+  <div class="kicker">01 · Why this matters</div>
+  <h2>Three things that are true</h2>
+  <ul>
+    <li class="build">Point one: a claim the audience already half-believes.</li>
+    <li class="build">Point two: the uncomfortable consequence of point one, with <span class="hl">one key figure</span> highlighted.</li>
+    <li class="build">Point three: why the usual fix does not work.</li>
+    <li class="build">Point four: what this talk proposes instead.</li>
+  </ul>
+  <div class="s-notes">
+    <p>One sentence per bullet, then stop talking and let them read. Do not read the bullets aloud.</p>
+  </div>
+</section>
+
+<!-- 5 · big stat row (builds reveal by themselves) -->
+<section class="slide" data-auto="600">
+  <div class="kicker">01 · Why this matters</div>
+  <h2>The numbers <span class="illustrative">Illustrative data</span></h2>
+  <div class="stats">
+    <div class="stat build"><span class="n">42</span><span class="cap">Placeholder metric with a caption</span></div>
+    <div class="stat build"><span class="n">3.5×</span><span class="cap">Another stub ratio, not measured</span></div>
+    <div class="stat build"><span class="n">99.9%</span><span class="cap">Every stub number is labelled</span></div>
+  </div>
+  <p class="small">Replace with sourced numbers and cite the source here, or keep the illustrative tag.</p>
+  <div class="s-notes">
+    <p>Stat panels appear by themselves, one every 600 ms. Say each number as it lands.</p>
+  </div>
+</section>
+
+<!-- 6 · two-column text + terminal panel -->
+<section class="slide">
+  <div class="kicker">02 · What we did</div>
+  <h2>In practice</h2>
+  <div class="cols">
+    <div>
+      <p>Left column carries the argument in two or three short paragraphs. The terminal on the right is the evidence.</p>
+      <p>Keep the panel to twelve lines or fewer; anything longer is unreadable from the back.</p>
+      <p><span class="illustrative">Illustrative output</span></p>
+    </div>
+    <div class="term"><span class="b">$</span> <span class="w">git log --oneline -4</span>
+<span class="d"># four most recent commits</span>
+a1b2c3d <span class="w">feat:</span> add export to PDF
+e4f5a6b <span class="w">fix:</span> handle empty input
+c7d8e9f docs: update README
+0a1b2c3 chore: bump dependencies
+<span class="b">$</span> <span class="w">make test</span>
+<span class="d">→ 128 passed · 0 failed · 2.4 s</span>
+<span class="b">$</span> <span class="w">_</span></div>
+  </div>
+  <div class="s-notes">
+    <p>Walk the terminal top to bottom. Point at the last result line: that is the takeaway.</p>
+  </div>
+</section>
+
+<!-- 7 · inline SVG chart -->
+<section class="slide">
+  <div class="kicker">02 · What we did</div>
+  <h2>Results per quarter <span class="illustrative">Illustrative data</span></h2>
+  <div class="chart">
+    <svg viewBox="0 0 1600 640" role="img" aria-label="Bar chart, illustrative: results per quarter, Q1 to Q4: 14, 9, 11, 6">
+      <g class="grid">
+        <line x1="120" y1="80"  x2="1560" y2="80"/>
+        <line x1="120" y1="230" x2="1560" y2="230"/>
+        <line x1="120" y1="380" x2="1560" y2="380"/>
+        <line x1="120" y1="530" x2="1560" y2="530"/>
+      </g>
+      <g class="axis" text-anchor="end">
+        <text x="90" y="88">15</text><text x="90" y="238">10</text><text x="90" y="388">5</text><text x="90" y="538">0</text>
+      </g>
+      <!-- bars: baseline y=530, 30px per unit, 8px rounded data-end -->
+      <g class="bar">
+        <path d="M300 530 V118 q0 -8 8 -8 h104 q8 0 8 8 V530 Z"><title>Q1: 14 (illustrative)</title></path>
+        <path d="M660 530 V268 q0 -8 8 -8 h104 q8 0 8 8 V530 Z"><title>Q2: 9 (illustrative)</title></path>
+        <path d="M1020 530 V208 q0 -8 8 -8 h104 q8 0 8 8 V530 Z"><title>Q3: 11 (illustrative)</title></path>
+        <path d="M1380 530 V358 q0 -8 8 -8 h104 q8 0 8 8 V530 Z"><title>Q4: 6 (illustrative)</title></path>
+      </g>
+      <g class="val" text-anchor="middle">
+        <text x="360" y="90">14</text>
+        <text x="1440" y="330">6</text>
+      </g>
+      <g class="axis" text-anchor="middle">
+        <text x="360" y="590">Q1</text><text x="720" y="590">Q2</text><text x="1080" y="590">Q3</text><text x="1440" y="590">Q4</text>
+      </g>
+    </svg>
+  </div>
+  <div class="s-notes">
+    <p>The point is the shape, not the values: name the peak, then the last bar, and move on.</p>
+  </div>
+</section>
+
+<!-- 8 · full-bleed quote on a dark slide -->
+<section class="slide dark quote">
+  <blockquote>A quotation, long enough to wrap to a second line, set large on a dark ground so the room can breathe for a moment.</blockquote>
+  <cite>Attributed speaker · Organisation · illustrative</cite>
+  <div class="s-notes">
+    <p>Read the quote aloud slowly. Pause two seconds before advancing.</p>
+  </div>
+</section>
+
+<!-- 9 · logo wall -->
+<section class="slide">
+  <div class="kicker">03 · In practice</div>
+  <h2>Who uses this <span class="illustrative">Placeholders</span></h2>
+  <div class="logos">
+    <div>Logo 1</div><div>Logo 2</div><div>Logo 3</div><div>Logo 4</div>
+    <div>Logo 5</div><div>Logo 6</div><div>Logo 7</div><div>Logo 8</div>
+  </div>
+  <div class="s-notes">
+    <p>Replace the dashed boxes with monochrome logos (inline SVG or relative image files). Keep the grid at four columns.</p>
+  </div>
+</section>
+
+<!-- 10 · keys cheat-sheet -->
+<section class="slide">
+  <div class="kicker">04 · Take home</div>
+  <h2>Driving this deck</h2>
+  <table class="keys">
+    <tr><td><kbd>→</kbd><kbd>Space</kbd></td><td>Next build step, then next slide</td></tr>
+    <tr><td><kbd>←</kbd></td><td>Undo build step, then previous slide</td></tr>
+    <tr><td><kbd>↓</kbd><kbd>↑</kbd></td><td>Skip forward / back a whole slide</td></tr>
+    <tr><td><kbd>N</kbd></td><td>Speaker notes overlay</td></tr>
+    <tr><td><kbd>T</kbd></td><td>Presenter timer (<kbd>Shift</kbd>+<kbd>T</kbd> resets)</td></tr>
+    <tr><td><kbd>F</kbd></td><td>Fullscreen</td></tr>
+    <tr><td><kbd>P</kbd></td><td>Print to PDF, one page per slide</td></tr>
+  </table>
+  <div class="s-notes">
+    <p>A table example; also handy as a reference slide while rehearsing.</p>
+  </div>
+</section>
+
+<!-- 11 · closing / contact card -->
+<section class="slide closing">
+  <div class="kicker">Thank you</div>
+  <h1>Questions?</h1>
+  <div class="contact">
+    <div><span class="l">Speaker</span>Speaker name · Role</div>
+    <div><span class="l">Web</span>example.com</div>
+    <div><span class="l">Slides</span>example.com/slides</div>
+  </div>
+  <a class="btn" href="https://example.com/">Get in touch</a>
+  <div class="s-notes">
+    <p>Closing line, verbatim. Then take questions.</p>
+  </div>
+</section>
+
+</div>
+
+<div id="notes" hidden></div>
+<div id="timer" hidden>00:00</div>
+
+<script>
+(() => {
+  const slides = [...document.querySelectorAll('.slide')];
+  const notes = document.getElementById('notes');
+  const timer = document.getElementById('timer');
+  const KEY = 'deck:' + location.pathname;
+  const store = {
+    get: () => { try { return sessionStorage.getItem(KEY); } catch { return null; } },
+    set: v => { try { sessionStorage.setItem(KEY, v); } catch {} }
+  };
+  const builds = s => [...s.querySelectorAll('.build')];
+  let i = Math.min(+store.get() || 0, slides.length - 1);
+  let autoTimer = null;
+
+  slides.forEach((s, k) => {
+    const c = document.createElement('span');
+    c.className = 'counter';
+    c.textContent = `${k + 1} / ${slides.length}`;
+    s.appendChild(c);
+  });
+
+  function show(n, built = false) {
+    clearTimeout(autoTimer);
+    i = Math.max(0, Math.min(n, slides.length - 1));
+    slides.forEach((s, k) => s.classList.toggle('current', k === i));
+    builds(slides[i]).forEach(b => b.classList.toggle('on', built));
+    store.set(i);
+    notes.innerHTML = slides[i].querySelector('.s-notes')?.innerHTML || '<em>No notes for this slide.</em>';
+    if (!built && slides[i].dataset.auto !== undefined) autoBuild(+slides[i].dataset.auto || 500);
+  }
+  function autoBuild(delay) {
+    const step = () => {
+      const b = builds(slides[i]).find(x => !x.classList.contains('on'));
+      if (!b) return;
+      b.classList.add('on');
+      autoTimer = setTimeout(step, delay);
+    };
+    autoTimer = setTimeout(step, delay);
+  }
+  function next() {
+    clearTimeout(autoTimer);
+    const b = builds(slides[i]).find(x => !x.classList.contains('on'));
+    b ? b.classList.add('on') : show(i + 1);
+  }
+  function prev() {
+    clearTimeout(autoTimer);
+    const on = builds(slides[i]).filter(x => x.classList.contains('on'));
+    on.length ? on.pop().classList.remove('on') : show(i - 1, true);
+  }
+
+  let t0 = null;
+  const pad = n => String(n).padStart(2, '0');
+  function tick() {
+    if (t0 === null) return;
+    const s = Math.floor((Date.now() - t0) / 1000);
+    timer.textContent = `${pad(Math.floor(s / 60))}:${pad(s % 60)}`;
+  }
+  setInterval(tick, 500);
+  function startTimer() { if (t0 === null) t0 = Date.now(); tick(); }
+  function resetTimer() { t0 = Date.now(); timer.hidden = false; tick(); }
+
+  addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    switch (e.key) {
+      case 'ArrowRight': case ' ': case 'PageDown': next(); break;
+      case 'ArrowLeft': case 'PageUp': prev(); break;
+      case 'ArrowDown': show(i + 1, true); break;
+      case 'ArrowUp': show(i - 1, true); break;
+      case 'Home': show(0); break;
+      case 'End': show(slides.length - 1, true); break;
+      case 'n': case 'N': notes.hidden = !notes.hidden; break;
+      case 't': timer.hidden = !timer.hidden; startTimer(); break;
+      case 'T': resetTimer(); break;
+      case 'f': case 'F':
+        document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+        break;
+      case 'p': case 'P': print(); break;
+      case 'Escape': notes.hidden = true; timer.hidden = true; break;
+      default: return;
+    }
+    e.preventDefault();
+  });
+
+  // click or tap: the left 30 % of the viewport goes back, the rest forward; links and buttons keep working
+  const stage = document.getElementById('stage');
+  let swiped = false, tx = 0, ty = 0;
+  stage.addEventListener('click', e => {
+    if (swiped || e.target.closest('a, button')) return;
+    (e.clientX < innerWidth * 0.3 ? prev : next)();
+  });
+  // swipe on touch: left is forward, right is back; a swipe suppresses the click that follows it
+  addEventListener('touchstart', e => { tx = e.touches[0].clientX; ty = e.touches[0].clientY; }, { passive: true });
+  addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
+    swiped = true; setTimeout(() => { swiped = false; }, 300);
+    (dx < 0 ? next : prev)();
+  }, { passive: true });
+
+  function fit() {
+    document.documentElement.style.setProperty('--scale', Math.min(innerWidth / 1920, innerHeight / 1080));
+  }
+  addEventListener('resize', fit);
+  fit();
+  show(i);
+})();
+</script>
+</body>
+</html>
